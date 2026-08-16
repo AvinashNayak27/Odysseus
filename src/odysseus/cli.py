@@ -15,6 +15,7 @@ from odysseus import __version__
 from odysseus.adapters import detect_adapters
 from odysseus.adapters.base import MetricDirection, MetricSpec, parse_metric
 from odysseus.approvals import approval_hash, verify_approval
+from odysseus.candidates.codex import CodexCliProvider
 from odysseus.candidates.prompts import build_request
 from odysseus.candidates.provider import (
     CandidateProvider,
@@ -42,6 +43,7 @@ from odysseus.models import ApprovalPlan, CommandResult, CommandSpec, StageStatu
 from odysseus.paths import canonical
 from odysseus.reports.renderer import ReportRenderer, ReviewInput
 from odysseus.research.pipeline import derive_questions
+from odysseus.skills import SkillError, discover_skills, select_skills
 from odysseus.state import StateError, StateStore, sha256_bytes, utc_now
 from odysseus.yukon.client import YukonClient
 from odysseus.yukon.discovery import bind_source_snapshot, build_shortlist
@@ -137,6 +139,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     candidates.add_argument("--workdir", type=Path, required=True)
     candidates.add_argument("--editable-path", action="append", required=True)
+    candidates.add_argument("--benchmark-language", help="trusted locked benchmark language")
+    candidates.add_argument("--benchmark-category", help="trusted locked benchmark category")
+    candidates.add_argument("--benchmark-tag", action="append", default=[], help="trusted locked benchmark tag")
+
+    skills = commands.add_parser("skills", help="inspect or validate declarative enabled skills")
+    skill_commands = skills.add_subparsers(dest="skills_command", required=True)
+    skill_commands.add_parser("list", help="list discovered skills and enabled selection")
+    skill_commands.add_parser("validate", help="validate discovery and enabled selection")
 
     experiment = commands.add_parser(
         "experiment", help="local experiment operations; imported data is never verified"
@@ -504,6 +514,67 @@ def _research(config: _JSON, args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _skills_config(config: _JSON) -> _JSON:
+    value = config.get("skills", {})
+    if not isinstance(value, dict):
+        raise PrerequisiteError("skills configuration must be an object")
+    return cast(_JSON, value)
+
+
+def _selected_skills(config: _JSON, args: argparse.Namespace) -> tuple[dict[str, object], ...]:
+    settings = _skills_config(config)
+    enabled = settings.get("enabled", [])
+    if enabled == []:
+        return ()
+    try:
+        records = discover_skills(settings)
+        selected = select_skills(
+            records,
+            settings,
+            language=args.benchmark_language,
+            category=args.benchmark_category,
+            tags=tuple(args.benchmark_tag),
+        )
+    except SkillError as error:
+        raise PrerequisiteError(f"skill discovery failed: {error}") from error
+    return tuple(record.prompt_record() for record in selected)
+
+
+def _skills(config: _JSON, args: argparse.Namespace) -> int:
+    settings = _skills_config(config)
+    try:
+        records = discover_skills(settings)
+        if args.skills_command == "list":
+            selected = select_skills(records, {**settings, "auto_select": False})
+        elif args.skills_command == "validate":
+            selected = select_skills(records, settings)
+        else:
+            raise PrerequisiteError("unsupported skills operation")
+    except SkillError as error:
+        raise PrerequisiteError(f"skill {args.skills_command} failed: {error}") from error
+    selected_names = {record.name for record in selected}
+    payload = {
+        "skills": [
+            {
+                "name": record.name,
+                "description": record.description,
+                "version": record.version,
+                "languages": list(record.languages),
+                "categories": list(record.categories),
+                "tags": list(record.tags),
+                "content_sha256": record.content_sha256,
+                "source": record.source,
+                "enabled": record.name in selected_names,
+            }
+            for record in records
+        ],
+        "selected": [record.provenance() for record in selected],
+    }
+    print(_json(payload))
+    return 0
+
+
 def _candidates(config: _JSON, args: argparse.Namespace) -> int:
     store = _config_state(config)
     request = _load_json(args.request, "candidate request")
@@ -524,8 +595,10 @@ def _candidates(config: _JSON, args: argparse.Namespace) -> int:
         editable_paths=cast(list[str], request["editable_paths"]),
         evidence=cast(list[dict[str, object]], request["evidence"]),
         untrusted_context=cast(list[str], request["untrusted_context"]),
+        skills=_selected_skills(config, args),
     )
     provider: CandidateProvider
+    workdir = canonical(args.workdir)
     provider_config = cast(_JSON, config["candidate_provider"])
     mode = cast(str, provider_config["mode"])
     max_response_bytes = cast(int, provider_config["max_response_bytes"])
@@ -537,6 +610,18 @@ def _candidates(config: _JSON, args: argparse.Namespace) -> int:
         provider = ExternalExecutableProvider(
             tuple(cast(list[str], provider_config["argv"])),
             cwd=store.root,
+            timeout_seconds=cast(int, provider_config["timeout_seconds"]),
+            max_request_bytes=cast(int, provider_config["max_request_bytes"]),
+            max_response_bytes=max_response_bytes,
+            max_candidates=cast(int, provider_config["max_candidates"]),
+        )
+    elif mode == "codex-cli":
+        provider = CodexCliProvider(
+            binary=cast(str, provider_config["binary"]),
+            public_model=cast(str, provider_config["public_model"]),
+            api_model=cast(str, provider_config["api_model"]),
+            effort=cast(str, provider_config["effort"]),
+            cwd=workdir,
             timeout_seconds=cast(int, provider_config["timeout_seconds"]),
             max_request_bytes=cast(int, provider_config["max_request_bytes"]),
             max_response_bytes=max_response_bytes,
@@ -579,7 +664,6 @@ def _candidates(config: _JSON, args: argparse.Namespace) -> int:
         response = provider.generate(built)
     except CandidateProviderError as error:
         raise PrerequisiteError(f"candidate provider failed: {error}") from error
-    workdir = canonical(args.workdir)
     editable = tuple(canonical(workdir / path) for path in args.editable_path)
     validated = []
     for hypothesis in response.hypotheses:
@@ -611,6 +695,11 @@ def _candidates(config: _JSON, args: argparse.Namespace) -> int:
             "provider": response.provider,
             "model": response.model,
             "effort": response.effort,
+            "skills": [skill["name"] for skill in built.skills],
+            "skill_provenance": [
+                {key: skill[key] for key in ("name", "version", "content_sha256")}
+                for skill in built.skills
+            ],
             "candidates": validated,
         },
     )
@@ -1147,6 +1236,7 @@ def main(argv: list[str] | None = None) -> int:
             "baseline": _baseline,
             "research": _research,
             "candidates": _candidates,
+            "skills": _skills,
             "experiment": _experiment,
             "report": _report,
             "status": _status,

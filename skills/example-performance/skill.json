@@ -1,0 +1,1 @@
+{"name":"performance-review","description":"Review bounded performance changes against measured hotspots.","version":"1.0.0","languages":["python","rust"],"categories":["systems"],"tags":["performance"]}

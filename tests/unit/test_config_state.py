@@ -66,6 +66,27 @@ class ConfigAndStateTests(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config(path)
 
+    def test_codex_cli_config_rejects_reference_or_external_cli_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            for forbidden in ("argv", "base_url", "secret_env"):
+                data = self._config(Path(temporary) / "state")
+                data["candidate_provider"] = {
+                    "mode": "codex-cli",
+                    "binary": "codex",
+                    "public_model": "Yukon Codex",
+                    "api_model": "gpt-5.6-codex",
+                    "effort": "high",
+                    "timeout_seconds": 1,
+                    "max_request_bytes": 1024,
+                    "max_candidates": 1,
+                    "max_response_bytes": 1024,
+                    forbidden: ["provider"] if forbidden == "argv" else "value",
+                }
+                path.write_text(json.dumps(data), encoding="utf-8")
+                with self.assertRaises(ConfigError):
+                    load_config(path)
+
     def test_state_preserves_code_identifiers_but_redacts_credential_literals(self) -> None:
         source_diff = (
             "diff --git a/src/parser.py b/src/parser.py\n"
