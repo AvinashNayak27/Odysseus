@@ -1,0 +1,5 @@
+\033[1mBenchmark                     Status    Category       Goal     Best    Closes       ID\033[0m
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Rust flock proving             open      proving        lower    120ms   2026-09-01   7a0db3c0-8d34-4b15-9b91-33197b250b57
+Lighter prover                 open      proving        higher   42.0    2026-09-01   1b5f7092-c2df-4ee8-94e7-1c03836d6b4e
+Swift qwen                     closed    inference      lower    9ms     2026-08-01   5ba7b5c1-2054-4817-a9d4-54f1d0a6a5f8
