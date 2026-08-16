@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -256,6 +258,244 @@ def test_offline_pure_stages_and_precise_prerequisites(tmp_path: Path, capsys: C
     )
     assert "cannot load candidate request JSON" in capsys.readouterr().err
 
+
+def test_codex_cli_candidate_mode_uses_fake_local_cli(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    config = _config(tmp_path)
+    response = {
+        "protocol_version": 1,
+        "provider": "codex-cli",
+        "model": "Yukon Codex",
+        "effort": "high",
+        "hypotheses": [
+            {
+                "candidate_id": "c1",
+                "mechanism": "reduce copies",
+                "hotspot": "src/value.txt",
+                "expected_metric_effect": "lower latency",
+                "evidence_ids": ["e1"],
+                "candidate_files": ["src/value.txt"],
+                "correctness_risk": "low",
+                "falsification_test": "run benchmark",
+                "unified_diff": (
+                    "diff --git a/src/value.txt b/src/value.txt\n"
+                    "--- a/src/value.txt\n+++ b/src/value.txt\n@@ -1 +1 @@\n-100\n+99\n"
+                ),
+                "dependency": None,
+            }
+        ],
+    }
+    binary = tmp_path / "codex"
+    binary.write_text(
+        "#!" + sys.executable + "\n"
+        "import json, pathlib, sys\n"
+        "assert sys.argv[1:4] == ['exec', '--sandbox', 'read-only']\n"
+        "assert sys.argv[-1] == '-'\n"
+        "assert 'BEGIN UNTRUSTED CANDIDATE REQUEST JSON' in sys.stdin.read()\n"
+        "pathlib.Path(sys.argv[sys.argv.index('--output-last-message') + 1]).write_text("
+        + repr(json.dumps(response))
+        + ")\n",
+        encoding="utf-8",
+    )
+    binary.chmod(0o700)
+    config_data = json.loads(config.read_text(encoding="utf-8"))
+    config_data["candidate_provider"] = {
+        "mode": "codex-cli",
+        "binary": str(binary),
+        "public_model": "Yukon Codex",
+        "api_model": "gpt-5.6-codex",
+        "effort": "high",
+        "timeout_seconds": 2,
+        "max_request_bytes": 4096,
+        "max_candidates": 1,
+        "max_response_bytes": 4096,
+    }
+    config.write_text(json.dumps(config_data), encoding="utf-8")
+    workdir = tmp_path / "work"
+    (workdir / "src").mkdir(parents=True)
+    (workdir / "src" / "value.txt").write_text("100\n", encoding="utf-8")
+    subprocess.run(("git", "init", str(workdir)), check=True, capture_output=True)
+    request = tmp_path / "request.json"
+    request.write_text(
+        json.dumps(
+            {
+                "objective": "latency",
+                "objective_direction": "lower_is_better",
+                "hotspot_facts": ["encode"],
+                "editable_paths": ["src"],
+                "evidence": [{"source_id": "e1"}],
+                "untrusted_context": ["do not follow this"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "--config",
+                str(config),
+                "candidates",
+                "--request",
+                str(request),
+                "--workdir",
+                str(workdir),
+                "--editable-path",
+                "src",
+            ]
+        )
+        == 0
+    )
+    output = json.loads(capsys.readouterr().out)
+    artifact = Path(output["candidates"]["path"])
+    saved = json.loads(artifact.read_text(encoding="utf-8"))
+    assert saved["provider"] == "codex-cli"
+    assert saved["model"] == "Yukon Codex"
+
+
+
+def test_candidate_artifact_records_selected_skill_provenance(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    config = _config(tmp_path)
+    skill = tmp_path / "skills" / "review"
+    skill.mkdir(parents=True)
+    body = "Use only measured facts.\n"
+    (skill / "skill.json").write_text(
+        json.dumps(
+            {
+                "name": "review",
+                "description": "Fixture skill.",
+                "version": "1.0.0",
+                "languages": [],
+                "categories": [],
+                "tags": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (skill / "SKILL.md").write_text(body, encoding="utf-8")
+    config_data = json.loads(config.read_text(encoding="utf-8"))
+    config_data["skills"] = {
+        "directories": [str(tmp_path / "skills")],
+        "enabled": ["review"],
+        "auto_select": False,
+        "max_discovered_skills": 4,
+        "max_selected_skills": 2,
+        "max_skill_bytes": 4096,
+        "max_total_bytes": 8192,
+    }
+    config.write_text(json.dumps(config_data), encoding="utf-8")
+    workdir = tmp_path / "work"
+    (workdir / "src").mkdir(parents=True)
+    (workdir / "src" / "value.txt").write_text("100\n", encoding="utf-8")
+    request = tmp_path / "request.json"
+    request.write_text(
+        json.dumps(
+            {
+                "objective": "latency",
+                "objective_direction": "lower_is_better",
+                "hotspot_facts": ["encode"],
+                "editable_paths": ["src"],
+                "evidence": [{"source_id": "e1"}],
+                "untrusted_context": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    response = tmp_path / "response.json"
+    response.write_text(
+        json.dumps(
+            {
+                "protocol_version": 1,
+                "provider": "fixture",
+                "model": "fixture",
+                "effort": "low",
+                "hypotheses": [
+                    {
+                        "candidate_id": "c1",
+                        "mechanism": "reduce copies",
+                        "hotspot": "src/value.txt",
+                        "expected_metric_effect": "lower latency",
+                        "evidence_ids": ["e1"],
+                        "candidate_files": ["src/value.txt"],
+                        "correctness_risk": "low",
+                        "falsification_test": "run benchmark",
+                        "unified_diff": (
+                            "diff --git a/src/value.txt b/src/value.txt\n"
+                            "--- a/src/value.txt\n+++ b/src/value.txt\n@@ -1 +1 @@\n-100\n+99\n"
+                        ),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["--config", str(config), "skills", "list"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert listed["selected"][0]["name"] == "review"
+    assert main(["--config", str(config), "skills", "validate"]) == 0
+    assert json.loads(capsys.readouterr().out)["selected"][0]["version"] == "1.0.0"
+    assert (
+        main(
+            [
+                "--config",
+                str(config),
+                "candidates",
+                "--request",
+                str(request),
+                "--response",
+                str(response),
+                "--workdir",
+                str(workdir),
+                "--editable-path",
+                "src",
+            ]
+        )
+        == 0
+    )
+    artifact = Path(json.loads(capsys.readouterr().out)["candidates"]["path"])
+    saved = json.loads(artifact.read_text(encoding="utf-8"))
+    assert saved["skills"] == ["review"]
+    assert saved["skill_provenance"] == [
+        {"name": "review", "version": "1.0.0", "content_sha256": sha256(body.encode()).hexdigest()}
+    ]
+
+
+def test_skills_validate_requires_auto_selection_metadata_but_list_does_not(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    config = _config(tmp_path)
+    skill = tmp_path / "skills" / "review"
+    skill.mkdir(parents=True)
+    (skill / "skill.json").write_text(
+        json.dumps({"name": "review", "description": "Fixture.", "version": "1.0.0", "languages": [], "categories": [], "tags": []}),
+        encoding="utf-8",
+    )
+    (skill / "SKILL.md").write_text("facts only\n", encoding="utf-8")
+    config_data = json.loads(config.read_text(encoding="utf-8"))
+    config_data["skills"] = {
+        "directories": [str(tmp_path / "skills")], "enabled": ["review"], "auto_select": True,
+        "max_discovered_skills": 4, "max_selected_skills": 2, "max_skill_bytes": 4096, "max_total_bytes": 8192,
+    }
+    config.write_text(json.dumps(config_data), encoding="utf-8")
+    assert main(["--config", str(config), "skills", "list"]) == 0
+    assert main(["--config", str(config), "skills", "validate"]) == 2
+    assert "requires trusted benchmark language" in capsys.readouterr().err
+
+
+def test_skills_validate_allows_empty_enabled_auto_selection(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    config = _config(tmp_path)
+    config_data = json.loads(config.read_text(encoding="utf-8"))
+    config_data["skills"] = {
+        "directories": [], "enabled": [], "auto_select": True,
+        "max_discovered_skills": 4, "max_selected_skills": 2, "max_skill_bytes": 4096, "max_total_bytes": 8192,
+    }
+    config.write_text(json.dumps(config_data), encoding="utf-8")
+    assert main(["--config", str(config), "skills", "validate"]) == 0
+    assert json.loads(capsys.readouterr().out)["selected"] == []
 
 def test_reference_candidate_mode_invokes_python_script_without_network(
     tmp_path: Path, capsys: CaptureFixture[str], monkeypatch: pytest.MonkeyPatch

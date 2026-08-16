@@ -52,12 +52,23 @@ provider credentials are inherited by approved child processes only.
 
 ## Candidate providers
 
-The `candidate_provider` configuration supports three retained adapter modes:
+The `candidate_provider` configuration supports four retained adapter modes:
 
 - `human-import` validates a response supplied with `candidates --response` and
   never executes a provider.
 - `external-cli` invokes the configured fixed `argv` using the harness's bounded
   shell-free `CommandRunner`. It remains the interoperability escape hatch.
+- `codex-cli` runs the fixed `codex exec` adapter with `--sandbox read-only`,
+  stdin prompt data, an exact `--output-schema`, a harness-owned
+  `--output-last-message` file, the exact Codex `api_model`, and a fixed
+  `model_reasoning_effort` override. Configure `binary`, exact public
+  Yukon `public_model` label, `api_model`, and `effort`. Authentication remains
+  exclusively in Codex's local CLI state: only `PATH`, `HOME`, `CODEX_HOME`, and
+  locale names are inherited; this mode has no token configuration or token flags.
+  It requires a real Git benchmark workdir, does not use `--skip-git-repo-check`,
+  and never edits the benchmark. If local Codex authentication is unavailable,
+  run `codex login` (or `codex doctor`) directly; Odysseus intentionally omits
+  Codex diagnostics from its public errors.
 - `reference` invokes the bundled `odysseus-reference-provider` in a separate
   process through the same command policy. Configure its HTTPS `base_url`, exact
   public Yukon `public_model` label (for example, `GPT 5.6 Sol`), exact API
@@ -98,3 +109,30 @@ use `external-cli` or `human-import`. No SDK is installed or required.
 See [SECURITY.md](SECURITY.md) for operating constraints. A human must review
 all installation, clone/setup, experiment, and any possible later publication
 outside this program.
+
+## Declarative skills
+
+`skills/` is an optional repository-level source of user-extensible agent skill
+context. A skill is exactly one directory containing a strict JSON `skill.json`
+manifest and one bounded `SKILL.md` body; see [`skills/README.md`](skills/README.md)
+and `skills/example-performance/`. It is declarative prompt data only, never a
+plugin or executable extension point.
+
+Configure absolute additional roots and the exact names permitted for a run in
+`skills`. Discovery also examines the repository `skills/` root and package-bundled
+skills, but **discovers nothing from home directories or Codex global skills**.
+Defaults enable no skill. `skills.enabled` is an explicit allowlist; optional
+`auto_select` can only narrow that allowlist using trusted benchmark metadata,
+never frontier/note/prompt text. For `candidates`, supply `--benchmark-language`
+and `--benchmark-category` whenever enabled auto-selection is used. Supply one or
+more `--benchmark-tag` values only when an enabled skill declares tags; tags are
+otherwise optional. An empty `skills.enabled` allowlist selects no skills and does
+not require benchmark metadata.
+
+`odysseus --config PRIVATE.json skills list` shows discovered metadata and the
+current enabled selection; `skills validate` verifies the same safe discovery
+rules. Symlinks, path escapes, duplicate names, extra files (including scripts,
+hooks, and commands), invalid manifests, and configured byte/count limits fail
+closed. Selected content is JSON-escaped and placed in the candidate request as
+untrusted data for every provider. Candidate artifacts record each selected
+skill's name, version, and content SHA-256 for provenance.

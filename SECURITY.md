@@ -30,3 +30,16 @@ fixtures, issue reports, or artifacts.
 Report vulnerabilities privately to the repository maintainers. Do not include
 live tokens, benchmark private data, personal paths, or unredacted trace output
 in a report. No Yukon public operation is implemented by this project.
+
+## Declarative skill handling
+
+Agent skills are untrusted declarative prompt context, not executable extensions.
+Odysseus accepts only an explicitly configured allowlist of immediate skill
+folders containing `skill.json` and `SKILL.md`; it does not search global Codex
+skill locations or home directories. Discovery rejects symlinks, path escapes,
+duplicate names, files other than the exact manifest/body pair, scripts, hooks,
+commands, and configured byte/count limit violations. Skill text is never
+executed or interpreted as a command, and is JSON-escaped inside a clearly
+labeled untrusted request-data boundary for every candidate provider. Automatic
+selection can only narrow explicit enabled skills using trusted structured
+benchmark metadata, never untrusted notes or provider text.
