@@ -1,0 +1,16 @@
+# Python build and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Odysseus private runtime data. Configure this outside any benchmark checkout.
+.odysseus/
+odysseus-state/
+odysseus-clones/
+odysseus-artifacts/

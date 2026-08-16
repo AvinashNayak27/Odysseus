@@ -1,0 +1,14 @@
+\033[1mLighter prover\033[0m
+
+Category       proving
+Goal           higher score is better
+Current best   42.0
+Closes         2026-09-01
+Source URL     https://github.com/example-org/sanitized-challenge.git @ 7e3d2b41c5f6a891
+Source branch  main
+Score path     score.json
+Setup          bun install --frozen-lockfile
+Benchmark      bun run benchmark
+
+This synthetic, sanitized fixture represents the real aligned Yukon detail output.
+It intentionally carries no personal identifiers, note text, or live repository data.

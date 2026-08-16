@@ -1,0 +1,6 @@
+Clone complete.
+Repository root  /tmp/yukon-clones/lighter
+Workdir          /tmp/yukon-clones/lighter/challenges/prover
+Editable paths   src, Cargo.toml
+
+Please restart your agent at /tmp/yukon-clones/lighter before continuing.

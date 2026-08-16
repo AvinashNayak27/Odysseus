@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "workspace": {
+    "state_root": "/var/tmp/odysseus-state",
+    "clone_root": "/var/tmp/odysseus-clones",
+    "artifact_retention_days": 30,
+    "max_output_bytes": 1048576
+  },
+  "yukon": {
+    "binary": "yukon",
+    "api_url_env": "YUKON_API_URL",
+    "read_retries": 2,
+    "setup_timeout_seconds": 900,
+    "run_timeout_seconds": 900
+  },
+  "selection": { "active_window_days": 14, "supported_objectives": ["minimize", "maximize"] },
+  "research": { "allowed_domains": ["go.dev"], "max_sources_per_query": 5 },
+  "experiments": { "pilot_samples": 3, "min_repetitions": 5, "max_repetitions": 20 },
+  "candidate_provider": {
+    "mode": "reference",
+    "base_url": "https://api.openai.com",
+    "public_model": "GPT 5.6 Sol",
+    "api_model": "gpt-5.6-sol",
+    "effort": "high",
+    "secret_env": "OPENAI_API_KEY",
+    "timeout_seconds": 120,
+    "max_request_bytes": 1048576,
+    "max_candidates": 5,
+    "max_response_bytes": 1048576
+  },
+  "reporting": { "private_path_aliases": { "/var/tmp": "$WORKSPACE" }, "note_min_bytes": 5120, "note_max_bytes": 10000 }
+}
